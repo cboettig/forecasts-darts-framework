@@ -1,0 +1,34 @@
+---
+output: github_markdown
+---
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+df <- read_csv("TCN_aquatics.csv")
+df
+```
+
+
+```{r}
+library(ncdf4)
+nc = ncdf4::nc_open("test.ncdf")
+nc
+```
+
+```{r}
+a = ncvar_get(nc, attributes(nc$var)$names[1])
+dim(a)
+```
+
+```{r}
+attributes(nc$var)
+#ncatt_get(nc, attributes(nc$var)$names[2])
+#
+```
+
+```{r}
+read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") %>% filter(!is.na(oxygen)) %>% select(!tidyselect::ends_with("sd"))
+```
