@@ -7,6 +7,18 @@ library(tidyverse)
 ```
 
 ```{r}
+
+site <- c("BART", "ORNL")
+time <- seq.Date(Sys.Date(), (Sys.Date()+5), 1)
+df <- expand_grid(site, time)
+df$predicted <- rnorm(nrow(df))
+df$variable <- "oxygen"
+df
+```
+
+
+
+```{r}
 df <- read_csv("TCN_aquatics.csv")
 df
 ```
@@ -30,5 +42,5 @@ attributes(nc$var)
 ```
 
 ```{r}
-read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") %>% filter(!is.na(oxygen)) %>% select(!tidyselect::ends_with("sd"))
+read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") %>% count(siteID, depth_oxygen)
 ```
