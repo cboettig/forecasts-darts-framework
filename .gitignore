@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Other
+*.grib
+*.idx
+*.f003
+*aanl

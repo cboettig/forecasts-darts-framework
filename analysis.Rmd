@@ -12,7 +12,7 @@ site <- c("BART", "ORNL")
 time <- seq.Date(Sys.Date(), (Sys.Date()+5), 1)
 df <- expand_grid(site, time)
 df$predicted <- rnorm(nrow(df))
-df$variable <- "oxygen"
+df$variable <- "temperature"
 df
 ```
 
@@ -43,4 +43,36 @@ attributes(nc$var)
 
 ```{r}
 read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") %>% count(siteID, depth_oxygen)
+```
+
+
+```{r}
+
+# Layers correspond to this table:
+# https://www.nco.ncep.noaa.gov/pmb/products/gens/geavg.t00z.pgrb2a.0p50.f000.shtml
+
+# Data naming conventions see: https://www.nco.ncep.noaa.gov/pmb/products/gens/
+library(terra)
+library(purrr)
+gefs <- function(
+    horizon = "000", # 000:384 hrs ahead
+    base = "https://noaa-gefs-pds.s3.amazonaws.com/",
+    date = "20220316",
+    cycle = "00",    # 00, 06, 12, 18 hr issued
+    series = "atmos",
+    set = "pgrb2a", # or pgrb2b for less common vars
+    NN = "p01", # p01-p20 replicates, or  "avg"
+    res = "0p50" # half 0.50 degree resolution
+    ) {
+  glue::glue("/vsicurl/{base}",
+             "gefs.{date}/{cycle}/{series}/{set}p5/",
+             "ge{NN}.t{cycle}z.{set}.{res}.f{horizon}")
+}
+
+as.character(seq(324,384, by=6)) -> i
+src <- map_chr(i, gefs)
+temp <- map(src, rast, lyrs = 64)
+length(temp)
+temp_stack <- do.call(c, temp)
+
 ```
