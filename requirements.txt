@@ -36,10 +36,6 @@ Glances==3.1.5
 google-auth==2.6.2
 google-auth-oauthlib==0.4.6
 grpcio==1.44.0
-gym==0.17.3
--e git+https://github.com/boettiger-lab/gym_conservation@8345934f086e90f9cc6f391c448b799eed0cb3c3#egg=gym_conservation
--e git+https://github.com/boettiger-lab/gym_fishing@34119a1164c079949131ead2ddebd771347c25f5#egg=gym_fishing
-gym-template==0.0.1
 hijri-converter==2.2.3
 holidays==0.13
 idna==2.10

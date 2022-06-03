@@ -1,0 +1,286 @@
+---
+pagetitle: aquatics
+toc-title: Table of contents
+---
+
+
+```{python}
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+pl_trainer_kwargs={"accelerator": "gpu", "gpus": 1, "auto_select_gpus": True} 
+
+```
+
+``` {python}
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+from darts import TimeSeries
+from darts.datasets import AirPassengersDataset
+```
+
+
+::: {.cell execution_count="3"}
+``` {python}
+#series = TimeSeries.from_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz", time_col = "time")
+
+aquatics = pd.read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") 
+aquatics
+```
+
+``` {python}
+
+ temp = aquatics.query("siteID == 'BARC'").query("depth_temperature == 0.55").filter(items=['time', 'temperature', 'depth_temperature'])
+
+ # consider siteID, depth variables as "future covariates", 
+```
+
+
+``` {python}
+
+series = TimeSeries.from_dataframe(temp, time_col = 'time', value_cols='temperature', fill_missing_dates=True, freq='D')
+```
+
+(Why is there a huge gap in 2018?)
+
+``` {python}
+plt.cla()
+series.plot()
+plt.show()
+```
+
+
+
+``` {python}
+train, val = series.split_before(0.75)
+train.plot(label="training")
+val.plot(label="validation")
+```
+
+``` {python}
+horizon = val.n_timesteps
+pts_in_yr = 400
+```
+
+``` {python}
+from darts.models import NaiveSeasonal
+
+seasonal_model = NaiveSeasonal(K=pts_in_yr)
+seasonal_model.fit(train)
+seasonal_forecast = seasonal_model.predict(horizon)
+
+
+plt.cla()
+series.plot(label="actual")
+seasonal_forecast.plot(label="naive forecast (K=12)")
+plt.show()
+
+```
+
+
+# Probablistic Forecasts
+
+``` {python}
+from darts.models import ExponentialSmoothing, Prophet, AutoARIMA, Theta
+model_es = ExponentialSmoothing()
+model_es.fit(train)
+probabilistic_forecast = model_es.predict(len(val), num_samples=500)
+
+plot.cla() # clear
+series.plot(label="actual")
+probabilistic_forecast.plot(label="probabilistic forecast")
+plt.legend()
+plt.show()
+
+```
+
+
+Missing values will create a problem for the neural net. We infer them
+first:
+
+
+``` {python}
+from darts.dataprocessing.transformers import MissingValuesFiller
+transformer = MissingValuesFiller()
+filtered_series = transformer.transform(train)
+```
+
+
+Alternatively, we can fill missing data and smooth the process using a filter such as a Gaussian Process. (not working)
+
+``` {python}
+from darts.models import GaussianProcessFilter
+from sklearn.gaussian_process.kernels import RBF, DotProduct
+kernel = DotProduct() # RBF()
+gpf = GaussianProcessFilter(kernel=kernel, alpha=0.1, normalize_y=True)
+gpf = GaussianProcessFilter(kernel=kernel, alpha=0.1, normalize_y=True)
+## Weirdly fails when GPU is visible. (ridiculuous since does not touch GPU?)
+#filtered_series = gpf.filter(train, num_samples=100)
+```
+
+``` {python}
+plt.cla()
+filtered_series.plot()
+plt.show()
+```
+
+We are now ready to define a deep learning forecasting model. 
+Note that the use of a GPU here will dramatically reduce computation time.
+
+``` {python}
+from darts.models import TCNModel
+from darts.utils.likelihood_models import LaplaceLikelihood
+
+
+model = TCNModel(
+    input_chunk_length=400,
+    output_chunk_length=100,
+    random_state=42,
+    likelihood=LaplaceLikelihood(),
+    pl_trainer_kwargs={"accelerator": "gpu", "gpus": 1, "auto_select_gpus": True} 
+
+)
+model.trainer_params
+```
+Before we can train the model, we must transform the data appropriately.
+
+``` {python}
+from darts.dataprocessing.transformers import Scaler
+scaler = Scaler()
+train_scaled = scaler.fit_transform(filtered_series)
+```
+
+And here we go.  It is possible to track performance using Tensorboard. Adjust epoch accordingly for convergence.
+
+``` {python}
+model.fit(train_scaled, epochs=400)
+```
+
+``` {python}
+pred = model.predict(n=horizon, num_samples=100)
+```
+
+``` {python}
+
+pred.plot(low_quantile=0.01, high_quantile=0.99, label="1-99th percentiles")
+pred.plot(low_quantile=0.2, high_quantile=0.8, label="20-80th percentiles")
+```
+
+
+``` {python}
+train.plot(label="training")
+val.plot(label="validation")
+pred = scaler.inverse_transform(pred)
+pred.plot(low_quantile=0.01, high_quantile=0.99, label="1-99th percentiles")
+pred.plot(low_quantile=0.2, high_quantile=0.8, label="20-80th percentiles")
+```
+
+``` {python}
+# some methods for darts.Timeseries: Observe:
+pred.is_stochastic # True
+pred.n_components # 1
+pred.n_samples # 500
+
+#pred.with_columns_renamed("component", "temperature")
+```
+
+
+Now we would like to serialize our forecast to a standard EFI format
+(time, site_id, variable, value, ensemble)
+
+``` {python}
+
+nd = pred.all_values() # numpy nd-array
+nd.shape # time x variables x replicates
+# index the first variable
+var1 = nd[:,0,:]
+var1.shape # time x replicate -- 2D array can be converted to DataFrame
+```
+
+``` {python}
+
+df = pd.DataFrame(var1)
+df['time'] = pred.time_index
+# pivot longer, ensemble as id, not as column name
+df = df.melt(id_vars="time", var_name="ensemble", value_name="value")
+
+df['variable'] = "temperature"
+df['site_id'] = "BART"
+
+df.to_csv("TCN_aquatics.csv.gz")
+df
+```
+
+
+``` {python}
+
+## fun with xarray
+da = pred.data_array() # underlying xarray object
+da = da.assign_coords({"time": pred.time_index})
+
+da = da.assign_coords({"site_id": "BARC"}) # text-valued coordinates!
+da = da.rename({"sample": "ensemble"})
+da = da.rename({"component": "variable"})
+#da.variable.attrs["long name"] = "lake surface temperature"
+#da.variable.attrs["units"] = "degrees C"
+da.attrs["long name"] = "Forecast of temperature levels at BARC site using a ML-based prediction"
+
+
+da = da.assign_coords({"time": pred.time_index})
+
+
+da
+```
+
+
+``` {python}
+#import xarray as xr
+#template = xr.DataArray(da.values, coords = {
+#    "time": da.time,
+#    "variable": ["temperature"],
+#    "ensemble": range(500)
+#    })
+#da.reindex_like(template)
+
+## Same as this: creates NaN
+## da.reindex({"variable": ["temperature"]})
+
+#da.set_index(temperature=["variable"])
+```
+
+
+``` {python}
+
+da.to_netcdf("test.ncdf")
+## cannot go to pandas / csv / tabular
+
+#pred.add_datetime_attribute
+#pred.quantiles_df().to_csv("TCN_aquatics.csv")
+```
+
+
+# Multi-dimensional analysis
+
+
+
+``` {python}
+# Cannot have repeated time indices, divide into unique series
+
+# average over repeated depth measurements on same day at same site?
+temp_POSE  = aquatics.query("siteID == 'POSE'").filter(items=['time', 'temperature', 'depth_temperature'])
+oxygen_POSE  = aquatics.query("siteID == 'POSE'").filter(items=['time', 'oxygen', 'depth_oxygen'])
+temp_POSE
+series_tP = TimeSeries.from_dataframe(temp_POSE, time_col = 'time', value_cols='temperature', fill_missing_dates=True, freq='D')
+series_oP = TimeSeries.from_dataframe(oxygen_POSE, time_col = 'time', value_cols='oxygen', fill_missing_dates=True, freq='D')
+```
+
+
+``` {python}
+#import xarray as xr
+#import matplotlib.pyplot as plt
+#xr.load_dataset("neon.grib", engine="cfgrib")
+```
+
+
