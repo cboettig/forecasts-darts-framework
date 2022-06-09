@@ -102,6 +102,8 @@ first:
 
 
 ``` {python}
+
+## Really dumb
 from darts.dataprocessing.transformers import MissingValuesFiller
 transformer = MissingValuesFiller()
 filtered_series = transformer.transform(train)
@@ -112,12 +114,11 @@ Alternatively, we can fill missing data and smooth the process using a filter su
 
 ``` {python}
 from darts.models import GaussianProcessFilter
-from sklearn.gaussian_process.kernels import RBF, DotProduct
-kernel = DotProduct() # RBF()
-gpf = GaussianProcessFilter(kernel=kernel, alpha=0.1, normalize_y=True)
+from sklearn.gaussian_process.kernels import RBF, DotProduct, WhiteKernel
+kernel = RBF()
 gpf = GaussianProcessFilter(kernel=kernel, alpha=0.1, normalize_y=True)
 ## Weirdly fails when GPU is visible. (ridiculuous since does not touch GPU?)
-#filtered_series = gpf.filter(train, num_samples=100)
+#filtered_series = gpf.filter(train, num_samples=1)
 ```
 
 ``` {python}
