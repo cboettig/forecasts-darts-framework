@@ -4,74 +4,71 @@ toc-title: Table of contents
 ---
 
 
-```{python}
+``` {python}
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from darts import TimeSeries
+from darts.datasets import AirPassengersDataset
+
+# GPU configuration
 import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 pl_trainer_kwargs={"accelerator": "gpu", "gpus": 1, "auto_select_gpus": True} 
 
 ```
 
-``` {python}
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+Note that BARC has 5 different depth temperatures, though only two in recent data. CRAM also has 2 depths.  Stream sites POSE, COMO, MCDI have no depth.  oxygen_depth varies even more!
 
-from darts import TimeSeries
-from darts.datasets import AirPassengersDataset
+```{r}
+## simplify the data (could be done in python)
+library(tidyverse)
+aquatics <- read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") 
+aquatics <- aquatics |> 
+  select(!contains(c("depth", "sd"))) |> 
+  group_by(time, siteID) |> 
+  summarise(across(!any_of(c("time", "siteID")), .fns = mean))
+
+aquatics |> filter(siteID=="CRAM") |> ggplot(aes(time, temperature)) + geom_point()
+
+## consider GP-fill since python is failing to do that?
+
+write_csv(aquatics, "aquatics-targets.csv.gz")
+
 ```
 
-
-::: {.cell execution_count="3"}
 ``` {python}
-#series = TimeSeries.from_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz", time_col = "time")
+#aquatics = pd.read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") 
+aquatics = pd.read_csv("aquatics-targets.csv.gz") 
 
-aquatics = pd.read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") 
-aquatics
+def ts_parser(df, siteID = "BARC", variable = "temperature"):
+   df = df[df["siteID"] == siteID]
+   # df = df[df["depth_temperature"] == 0.55]
+   df = df[['time', variable]]
+   series = TimeSeries.from_dataframe(df, time_col = 'time', value_cols = variable, fill_missing_dates = True, freq = 'D')
+   return(series)
+
+series = ts_parser(aquatics)
 ```
 
 ``` {python}
-
- temp = aquatics.query("siteID == 'BARC'").query("depth_temperature == 0.55").filter(items=['time', 'temperature', 'depth_temperature'])
-
- # consider siteID, depth variables as "future covariates", 
-```
-
-
-``` {python}
-
-series = TimeSeries.from_dataframe(temp, time_col = 'time', value_cols='temperature', fill_missing_dates=True, freq='D')
-```
-
-(Why is there a huge gap in 2018?)
-
-``` {python}
-plt.cla()
-series.plot()
-plt.show()
-```
-
-
-
-``` {python}
+## development purposes only, production runs will use all available data
 train, val = series.split_before(0.75)
-train.plot(label="training")
-val.plot(label="validation")
 ```
 
 ``` {python}
 horizon = val.n_timesteps
 pts_in_yr = 400
-```
-
-``` {python}
 from darts.models import NaiveSeasonal
 
 seasonal_model = NaiveSeasonal(K=pts_in_yr)
 seasonal_model.fit(train)
 seasonal_forecast = seasonal_model.predict(horizon)
+```
 
 
+```{r}
 plt.cla()
 series.plot(label="actual")
 seasonal_forecast.plot(label="naive forecast (K=12)")
