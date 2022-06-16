@@ -39,7 +39,7 @@ def efi_format(pred, site_id, variable):
 
 
 def fc_name(theme, team, pub_time = date.today()):
-  filename = theme + "-" + pub_time.strftime("%Y-%m-%d") + "-" + team +  ".csv.gz"
+  filename = theme + "-" + pub_time.strftime("%Y-%m-%d") + "-" + team +  ".csv"
   return(filename)
 
 

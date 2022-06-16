@@ -114,3 +114,7 @@ dmypy.json
 
 
 .aws_credentials
+*.gz
+*.csv
+*.ncdf
+*.html
