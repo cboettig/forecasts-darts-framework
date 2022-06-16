@@ -1,13 +1,14 @@
 ---
 pagetitle: aquatics
 toc-title: Table of contents
+format: gfm
 ---
 
 
 
 Note that BARC has 5 different depth temperatures, though only two in recent data. CRAM also has 2 depths.  Stream sites POSE, COMO, MCDI have no depth.  oxygen_depth varies even more!
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 ## simplify the data (could be done in python)
 library(tidyverse)
 aquatics <- read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") 
@@ -80,7 +81,7 @@ def forecast_csv(df, team = "cb_prophet"):
   today = date.today()
   team = "cb_prophet"
   filename = "aquatics" + "-" + today.strftime("%Y-%m-%d") + "-" + team +  ".csv.gz"
-  df.to_csv(filename)
+  df.to_csv(filename, index=False)
 
 ```
 
@@ -88,48 +89,85 @@ def forecast_csv(df, team = "cb_prophet"):
 ``` {python}
 horizon = 14
 
+
+dev_test = False
 aquatics = pd.read_csv("aquatics-targets.csv.gz")
 sites = aquatics["siteID"].unique()
-sites
-variable = "temperature"
+variables = ["temperature", "oxygen", "chla"]
 
 full = pd.DataFrame()
 
-for site_id in sites:
-  series = ts_parser(aquatics, site_id, variable)
-  
-  ## development purposes only, production runs will use all available data
-  train, val = series.split_before(0.75)
-  horizon = len(val)
-  
-  model = Prophet() # ExponentialSmoothing(), AutoARIMA(), Theta()
-  model.fit(train)
-  forecast = model.predict(horizon, num_samples=500)
-  df = efi_format(forecast, site_id, variable)
-  full = pd.concat([full,df])
+# Note: still specific to old format targets file
+for variable in variables:
+  for site_id in sites:
+    train = ts_parser(aquatics, site_id, variable)
+    
+    ## development purposes only, production runs will use all available data
+    if dev_test:
+      train, val = train.split_before(0.75)
+      horizon = len(val)
+    
+    model = Prophet() # ExponentialSmoothing(), AutoARIMA(), Theta()
+    model.fit(train)
+    forecast = model.predict(horizon, num_samples=500)
+    df = efi_format(forecast, site_id, variable)
+    full = pd.concat([full,df])
 
 forecast_csv(full, "cb_prophet")
 ```
 
-
-``` {python}
-plt.cla() # clear
-series.plot(label="actual")
-probabilistic_forecast.plot(label="probabilistic forecast")
-plt.show()
+```{r}
+neon4cast::submit("aquatics-2022-06-15-cb_prophet.csv.gz")
 ```
 
 
+## Compare
+
+```{r}
+fc <- read_csv("aquatics-2022-06-15-cb_prophet.csv.gz")
+
+observed <- 
+  aquatics |> 
+  rename(site_id = siteID) |>
+  pivot_longer(c("temperature", "oxygen", "chla"), names_to = "variable", values_to="observed") 
+
+fc_summary <- fc |> 
+  group_by(variable, site_id, time) |> 
+  summarise(mean = mean(value), sd = sd(value))
 
 
-``` {python}
+var <- "temperature"
+fc_summary |> filter(variable == var) |> 
+  ggplot(aes(time)) + 
+  geom_ribbon(aes(y=mean, ymin=mean-2*sd, ymax=mean+2*sd), alpha=0.2, fill="blue") +
+  geom_line(aes(y=mean), col="blue", alpha=.5) + 
+  geom_point(aes(time, observed), shape = ".", data = filter(observed, variable==var)) + 
+  facet_wrap(~site_id, scales="free")
 
 
-df = efi_format(pred, site_id, variable)
-```
+var <- "oxygen"
+fc_summary |> filter(variable == var) |> 
+  ggplot(aes(time)) + 
+  geom_ribbon(aes(y=mean, ymin=mean-2*sd, ymax=mean+2*sd), alpha=0.2, fill="blue") +
+  geom_line(aes(y=mean), col="blue", alpha=.5) + 
+  geom_point(aes(time, observed), shape = ".", data = filter(observed, variable==var)) + 
+  facet_wrap(~site_id, scales="free")
 
 
-``` {python}
+var <- "chla"
+fc_summary |> filter(variable == var) |> 
+  ggplot(aes(time)) + 
+  geom_ribbon(aes(y=mean, ymin=mean-2*sd, ymax=mean+2*sd), alpha=0.2, fill="blue") +
+  geom_line(aes(y=mean), col="blue", alpha=.5) + 
+  geom_point(aes(time, observed), shape = ".", data = filter(observed, variable==var)) + 
+  facet_wrap(~site_id, scales="free")
+
+#  facet_grid(variable~site_id, scales="free")
+
+
+
+
+
 
 ```
 

@@ -111,3 +111,6 @@ dmypy.json
 .Rproj.user
 .Rhistory
 .vscode
+
+
+.aws_credentials
