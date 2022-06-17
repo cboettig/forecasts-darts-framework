@@ -1,0 +1,154 @@
+---
+pagetitle: phenology
+format: gfm
+---
+
+
+``` {python}
+import pandas as pd
+import matplotlib.pyplot as plt
+from darts import TimeSeries
+import darts
+from darts.models import Prophet
+from utils.forecast_utils import forecast_each, ts_parser
+
+```
+
+
+``` {python}
+targets = pd.read_csv("https://data.ecoforecast.org/targets/phenology/phenology-targets.csv.gz")
+```
+
+
+``` {python}
+series = ts_parser(targets, "BART", "gcc_90", freq="D")
+train, val = series.split_before(0.75)
+```
+
+
+``` {python}
+train.plot(label="training")
+val.plot(label="validation")
+plt.show()
+
+```
+
+
+
+``` {python}
+horizon = val.n_timesteps
+pts_in_yr = 365
+```
+
+``` {python}
+from darts.models import NaiveSeasonal
+
+seasonal_model = NaiveSeasonal(K=pts_in_yr)
+seasonal_model.fit(train)
+seasonal_forecast = seasonal_model.predict(horizon)
+
+
+plt.cla()
+series.plot(label="actual")
+seasonal_forecast.plot(label="naive forecast")
+plt.show()
+
+```
+
+
+# Probablistic Forecasts
+
+``` {python}
+from darts.models import ExponentialSmoothing, Prophet, AutoARIMA, Theta
+model_es = ExponentialSmoothing()
+model_es.fit(train)
+probabilistic_forecast = model_es.predict(len(val), num_samples=500)
+
+plt.cla() # clear
+series.plot(label="actual")
+probabilistic_forecast.plot(label="probabilistic forecast")
+plt.legend()
+plt.show()
+
+```
+
+
+Missing values will create a problem for the neural net. 
+We can fill missing data and smooth the process using a filter such as a Gaussian Process. (not working)
+
+``` {python}
+from darts.models import GaussianProcessFilter
+from sklearn.gaussian_process.kernels import RBF, DotProduct, WhiteKernel
+kernel = RBF()
+gpf = GaussianProcessFilter(kernel=kernel, alpha=0.1, normalize_y=True)
+filtered_series = gpf.filter(train, num_samples=1)
+```
+
+``` {python}
+plt.cla()
+filtered_series.plot()
+plt.legend()
+plt.show()
+```
+
+We are now ready to define a deep learning forecasting model. 
+Note that the use of a GPU here will dramatically reduce computation time.
+
+``` {python}
+from darts.models import TCNModel
+from darts.utils.likelihood_models import LaplaceLikelihood
+
+
+model = TCNModel(
+    input_chunk_length=365,  # pts_in_yr
+    output_chunk_length=100, # forecast horizon
+    random_state=42,
+    likelihood=LaplaceLikelihood(),
+    pl_trainer_kwargs={"accelerator": "gpu", "gpus": 1, "auto_select_gpus": True} 
+
+)
+model.trainer_params
+```
+Before we can train the model, we must transform the data appropriately.
+
+``` {python}
+from darts.dataprocessing.transformers import Scaler
+scaler = Scaler()
+train_scaled = scaler.fit_transform(filtered_series)
+```
+
+And here we go.  It is possible to track performance using Tensorboard. Adjust epoch accordingly for convergence.
+
+``` {python}
+model.fit(train_scaled, epochs=400)
+```
+
+``` {python}
+pred = model.predict(n=horizon, num_samples=100)
+```
+
+``` {python}
+plt.cla()
+
+pred.plot(low_quantile=0.01, high_quantile=0.99, label="1-99th percentiles")
+pred.plot(low_quantile=0.2, high_quantile=0.8, label="20-80th percentiles")
+
+plt.show()
+```
+
+
+``` {python}
+plt.cla()
+
+train.plot(label="training")
+val.plot(label="validation")
+pred = scaler.inverse_transform(pred)
+pred.plot(low_quantile=0.01, high_quantile=0.99, label="1-99th percentiles")
+pred.plot(low_quantile=0.2, high_quantile=0.8, label="20-80th percentiles")
+
+plt.show()
+```
+
+
+``` {python}
+```
