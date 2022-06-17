@@ -23,7 +23,6 @@ aquatics <- aquatics |>
 
 write_csv(aquatics, "aquatics-targets.csv.gz")
 
-aquatics |> select(siteID) |> distinct() |> pull(siteID)
 ```
 
 
