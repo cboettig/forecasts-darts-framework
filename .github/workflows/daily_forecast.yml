@@ -32,9 +32,7 @@ jobs:
 
     - uses: r-lib/actions/setup-r@v1
 
-    - uses: r-lib/actions/setup-r-dependencies@v1
-      with:
-        extra-packages: tidyverse
+    - uses: r-lib/actions/setup-renv@v1
 
     - name: Phenology
       run: |
