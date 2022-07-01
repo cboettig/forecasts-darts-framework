@@ -30,9 +30,19 @@ jobs:
         # cpu version of pytorch
         pip install -r requirements.txt
 
+    - uses: r-lib/actions/setup-r@v1
+
+    - uses: r-lib/actions/setup-r-dependencies@v1
+      with:
+        extra-packages: tidyverse
+
     - name: Phenology
       run: |
         python phenology.py
+
+    - name: Aquatics-preprocess
+      run: |
+        Rscript aquatics.R
 
     - name: Aquatics
       run: |
