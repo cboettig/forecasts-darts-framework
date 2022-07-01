@@ -33,3 +33,15 @@ jobs:
     - name: Phenology
       run: |
         python phenology.py
+
+    - name: Aquatics
+      run: |
+        python aquatics.py
+
+    - name: Terrestrial Daily
+      run: |
+        python terrestrial_daily.py
+
+    - name: Terrestrial 30min
+      run: |
+        python terrestrial_30min.py
