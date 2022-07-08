@@ -1345,7 +1345,7 @@
       "RemoteRef": "main",
       "RemoteSha": "85aae2ba5964bbb3067be4e3120cb938c2c17b6d",
       "Remotes": "github::eco4cast/read4cast",
-      "Hash": "07aa5e59c6e2b46bfc56e46b75187365",
+      "Hash": "c15192cc141cb0d4c0f7d493db2816f3",
       "Requirements": [
         "ISOweek",
         "arrow",

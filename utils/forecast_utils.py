@@ -71,12 +71,29 @@ def forecast_each(model, targets, variables, horizon, freq = "D"):
       print(site_id)
       train = ts_parser(targets, site_id, variable, freq = freq)
       model.fit(train)
-      forecast = model.predict(horizon, num_samples=500)
+      forecast = model.predict(horizon, num_samples=100)
       df = efi_format(forecast, site_id, variable)
       full = pd.concat([full,df])
   return(full)
 
 
+def forecast_routine(model, targets, variables, horizon, freq = "D"):
+  full = pd.DataFrame()
+  sites = targets["siteID"].unique()
+
+  for variable in variables:
+    print(variable)
+    for site_id in sites:
+      print(site_id)
+      train = ts_parser(targets, site_id, variable, freq = freq)
+      
+      
+      
+      model.fit(train)
+      forecast = model.predict(horizon, num_samples=500)
+      df = efi_format(forecast, site_id, variable)
+      full = pd.concat([full,df])
+  return(full)
 
 
 
