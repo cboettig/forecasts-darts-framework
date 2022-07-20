@@ -8,6 +8,7 @@ import pyarrow as pa
 from pyarrow import csv
 
 #FIXME can darts.TimeSeries have multiple variables? multiple sites?
+## See  darts.TimeSeries.from_group_dataframe to build a LIST of timeseries from a GROUPED dataframe
 
 def ts_parser(df, siteID, variable, freq=None):
   df = df[df["siteID"] == siteID]

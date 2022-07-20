@@ -57,6 +57,8 @@ import pyarrow.parquet as pq
 table = pa.Table.from_pandas(full)
 pq.write_table(table, 'example.parquet')
 
+submit(table, "terrestrial_daily", "cb_tcnmodel")
+
 
 #import matplotlib.pyplot as plt
 #plt.cla()
