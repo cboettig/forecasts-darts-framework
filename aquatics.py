@@ -5,7 +5,7 @@ from darts import TimeSeries
 
 ## Needs targets averaged over depths
 targets = pd.read_csv("aquatics-targets.csv.gz")
-horizon = 14
+horizon = 35
 variables = ["temperature", "oxygen", "chla"]
 model = Prophet()
 full = forecast_each(model, targets, variables, horizon, freq = "D")
