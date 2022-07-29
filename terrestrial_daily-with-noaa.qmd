@@ -1,0 +1,113 @@
+---
+title: "Time Series Forecasting using past and future external data"
+---
+
+
+In this tutorial, we will construct a forecast using meteorological co-variates.
+This version of the tutorial focuses on python using the [darts](https://unit8co.github.io/darts) module to construct forecasts. Our [analogous tutorial in R]() focuses on the [fable](https://fable.tidyverts.org/) package.  In both cases, we will access external covariate time series in the form of meterological measurements and forecasts provided by the Ecological Forecasting Initiative using Apache Arrow(R). 
+
+
+The [covariates](https://unit8co.github.io/darts/userguide/covariates.html) guide for the darts package provides an excellent introduction to how darts models handle external data. 
+`darts` distinguishes between "past covariates", e.g. historical measurements of variables that may be correlated (causually or otherwise) with the 'target' variable of interest, and "future covariates", or forecasts of said variables. Some methods may use only past covariates, only future covariates, while others use both.  We will consider examples of each.
+
+
+First we load the required libraries:
+
+```{python}
+from darts import TimeSeries
+import pyarrow.dataset as ds
+from pyarrow import fs
+import pandas as pd
+
+```
+
+
+We begin by reading in the historical data which we wish to forecast:
+
+```{python}
+targets = pd.read_csv("https://data.ecoforecast.org/targets/terrestrial_daily/terrestrial_daily-targets.csv.gz")
+```
+
+
+
+```{python}
+horizon = 35
+variables = ["nee", "le"]
+```
+
+
+
+
+The Global Ensemble Forecast System (GEFS) is NOAA's longest horizon forecast product, extending a full 30 days into the future and covering the entire earth at 0.5 degree resolution. 
+For convenience, [Ecological Forecasting Initiative NEON Forecasting Challenge](https://projects.ecoforecast.org/neon4cast-docs) provides convenient scaled-down snapshots of these forecasts at all NEON sites using an S3-backed parquet database containing all GEFS forecasts for these sites going back to Sep 25, 2020 across seven variables and 31 ensemble members representing uncertainty across the forecast.
+Even restricted to this subset of variables and sites, these data are very large, well over 30 GB. 
+Fortunately, the Apache Arrow software, accessible for any major language, allows us efficiently filter just the section of forecast data we need without having to download or process the entire thing.
+
+
+In python, we establish an arrow-based connection to the dataset as follows:
+
+```{python}
+s3 = fs.S3FileSystem(endpoint_override = "data.ecoforecast.org", anonymous = True)
+dataset = ds.dataset(
+    "neon4cast-drivers/noaa/gefs-v12/stage1",
+    format="parquet",
+    filesystem=s3,
+    partitioning=["start_date", "cycle"]
+)
+```
+
+We can use standard methods to filter the data to a forecast made a specific date and time (`cycle == 0`).
+For simplicity, let's start by focusing on a single ensemble member of the forecast at a specific site (BART) using a specific variable of interest (temperature):
+
+```{r}
+expression = (
+              (ds.field("site_id") == "BART") &
+              (ds.field("variable") == "TMP") &
+              (ds.field("start_date") == "2022-06-01") &
+              (ds.field("cycle") == 0) &
+              (ds.field("ensemble")  == 1)
+              )
+ex = dataset.to_table(filter=expression)
+predicted = ex.to_pandas()[['time', 'predicted']]
+
+
+```
+
+Some additional work is required to coerce this into a "TimeSeries" object, which allows Python to recognize that this is a regularly sampled (3 hour interval), one-dimensional time series indexed with UTC datetime values.
+(Unfortunately, the `darts` method `Timeseries.from_dataframe` does not automatically recognize the "datetime64" encoding used in the Parquet data object at this time.  We must work around this using pandas DatatimeIndex constructors)
+
+```{python}
+# ICK this throws: `Error: Cannot interpret 'datetime64[ns, UTC]' as a data type`
+#series = TimeSeries.from_dataframe(df, time_col = 'time', value_cols = 'predicted', fill_missing_dates = True)
+
+# Manually parse the datetime64[ns, UTC] date into a pandas index:
+datetime_series = pd.to_datetime(df['time'], infer_datetime_format=True, utc=True)
+datetime_index = pd.DatetimeIndex(datetime_series.values)
+values=df.set_index(datetime_index)
+values.drop('time', axis=1,inplace=True)
+series = TimeSeries.from_dataframe(values, value_cols = 'predicted',
+                                   fill_missing_dates = True, freq = '3H')
+
+```
+
+
+
+```{python}
+neon_temp = ds.dataset(
+    "neon4cast-targets/neon/TAAT_30min-basic-DP1.00003.001",
+    format="parquet",
+    filesystem=s3)
+expression = (ds.field("site_id") == "BART")
+historical = neon_temp.to_table(filter=expression)
+
+df = ex.to_pandas()[['time', 'predicted']]
+```
+
+
+
+Note: more realistically, we would want to create a grouped time series reflecting each ensemble member in the forecast -- See  `darts.TimeSeries.from_group_dataframe` to build a `LIST` of timeseries from a `GROUPED` dataframe.
+
+
+
+
+
