@@ -19,6 +19,8 @@ import pyarrow.dataset as ds
 from pyarrow import fs
 import pandas as pd
 
+import matplotlib.pyplot as plt
+from datetime import datetime
 ```
 
 
@@ -26,17 +28,126 @@ We begin by reading in the historical data which we wish to forecast:
 
 ```{python}
 targets = pd.read_csv("https://data.ecoforecast.org/targets/terrestrial_daily/terrestrial_daily-targets.csv.gz")
+
+# Select a variable and site to examine & coerce dataframe to TimeSeries
+variable = "nee" # 
+df = targets
+df = df[df["siteID"] == 'BART']
+df = df[['time', variable]]
+series = TimeSeries.from_dataframe(df, time_col = 'time', value_cols = variable, fill_missing_dates = True)
 ```
+
+For a proof-of-principle, we will imagine that today is June 1, 2022. 
+This will allow us to compare to reality without waiting a month for the data to come in. 
+In practice a training process might iterate with a sliding split, while a production forecast will always use the actual current date.
+
+
+```{python}
+today  = pd.to_datetime("2022-06-01")
+#pt = series.n_timesteps-35
+train, test = series.split_before(today)
+test, _ = test.split_before(35)
+plt.cla()
+train.plot()
+test.plot()
+plt.show()
+```
+
+Before we attempt to produce a forecast using covariates, we can establish a benchmark forecast using only historical values.
 
 
 
 ```{python}
-horizon = 35
-variables = ["nee", "le"]
+from darts.models import Prophet, NaiveSeasonal, RegressionModel
+
+model = Prophet()
+model.fit(train)
+forecast = model.predict(35, num_samples=100)
+
+
+naive =  NaiveSeasonal(K=365)
+naive.fit(train)
+naive_forecast = naive.predict(35)
+
+
+regression = RegressionModel(lags=[-1,-2,-3,-4,-5,-6])
+regression.fit(train)
+reg_forecast = regression.predict(35)
+
 ```
 
 
+```{python}
+plt.cla()
+#train.plot()
+test.plot()
+forecast.plot()
+naive_forecast.plot()
+reg_forecast.plot()
+plt.show()
+```
 
+
+# Evaluating Models
+
+```{python}
+from darts.metrics import mape, rho_risk, rmse
+
+print(
+    "Naive mean absolute percentage error {:.2f}%."
+    .format(mape(test, naive_forecast) )
+    )
+
+print(
+    "Prophet mean absolute percentage error {:.2f}%."
+    .format(mape(test, forecast) )
+    )
+print(
+    "Regression mean absolute percentage error {:.2f}%."
+    .format(mape(test, reg_forecast) )
+    )
+
+
+
+rho_risk(test,forecast)
+
+rmse(test,reg_forecast)
+rmse(test,naive_forecast)
+rmse(test,forecast)
+```
+
+```{python}
+from darts.metrics import rmse
+
+# We first set aside the first 80% as training series:
+train, _ = series.split_before(0.8)
+
+def eval_model(model, past_covariates=None, future_covariates=None):
+    # Past and future covariates are optional because they won't always be used in our tests
+    
+    # We backtest the model on the last 20% of the flow series, with a horizon of 10 steps:
+    # Unfortunately not parallelized
+    backtest = model.historical_forecasts(series=series, 
+                                          past_covariates=past_covariates,
+                                          future_covariates=future_covariates,
+                                          start=0.8,
+                                          stride=10,
+                                          #retrain=False,
+                                          verbose=True, 
+                                          forecast_horizon=35)
+    
+    series[-len(backtest)-100:].plot()
+    backtest.plot(label='backtest (n=35)')
+    print('Backtest RMSE = {}'.format(rmse(series, backtest)))
+```
+
+```{python}
+eval_model(model)
+plt.show()
+```
+
+
+# Future Covariates
 
 The Global Ensemble Forecast System (GEFS) is NOAA's longest horizon forecast product, extending a full 30 days into the future and covering the entire earth at 0.5 degree resolution. 
 For convenience, [Ecological Forecasting Initiative NEON Forecasting Challenge](https://projects.ecoforecast.org/neon4cast-docs) provides convenient scaled-down snapshots of these forecasts at all NEON sites using an S3-backed parquet database containing all GEFS forecasts for these sites going back to Sep 25, 2020 across seven variables and 31 ensemble members representing uncertainty across the forecast.
@@ -44,7 +155,9 @@ Even restricted to this subset of variables and sites, these data are very large
 Fortunately, the Apache Arrow software, accessible for any major language, allows us efficiently filter just the section of forecast data we need without having to download or process the entire thing.
 
 
-In python, we establish an arrow-based connection to the dataset as follows:
+We establish an arrow-based connection to the remote dataset.
+Be a little patient with these next methods, though arrow cleverly avoids transferring the entire thing, this dataset is still huge.
+Be judicious in choosing filters before reading into python with the `to_table()` method.
 
 ```{python}
 s3 = fs.S3FileSystem(endpoint_override = "data.ecoforecast.org", anonymous = True)
@@ -59,18 +172,17 @@ dataset = ds.dataset(
 We can use standard methods to filter the data to a forecast made a specific date and time (`cycle == 0`).
 For simplicity, let's start by focusing on a single ensemble member of the forecast at a specific site (BART) using a specific variable of interest (temperature):
 
-```{r}
+```{python}
 expression = (
               (ds.field("site_id") == "BART") &
               (ds.field("variable") == "TMP") &
-              (ds.field("start_date") == "2022-06-01") &
+              (ds.field("start_date") == "2022-05-30") &
               (ds.field("cycle") == 0) &
               (ds.field("ensemble")  == 1)
               )
 ex = dataset.to_table(filter=expression)
 predicted = ex.to_pandas()[['time', 'predicted']]
-
-
+predicted
 ```
 
 Some additional work is required to coerce this into a "TimeSeries" object, which allows Python to recognize that this is a regularly sampled (3 hour interval), one-dimensional time series indexed with UTC datetime values.
@@ -78,18 +190,25 @@ Some additional work is required to coerce this into a "TimeSeries" object, whic
 
 ```{python}
 # ICK this throws: `Error: Cannot interpret 'datetime64[ns, UTC]' as a data type`
-#series = TimeSeries.from_dataframe(df, time_col = 'time', value_cols = 'predicted', fill_missing_dates = True)
+#series = TimeSeries.from_dataframe(predicted, time_col = 'time', value_cols = 'predicted', fill_missing_dates = True)
 
 # Manually parse the datetime64[ns, UTC] date into a pandas index:
-datetime_series = pd.to_datetime(df['time'], infer_datetime_format=True, utc=True)
+datetime_series = pd.to_datetime(predicted['time'], infer_datetime_format=True, utc=True)
 datetime_index = pd.DatetimeIndex(datetime_series.values)
-values=df.set_index(datetime_index)
+values=predicted.set_index(datetime_index)
 values.drop('time', axis=1,inplace=True)
-series = TimeSeries.from_dataframe(values, value_cols = 'predicted',
+noaa_forecast = TimeSeries.from_dataframe(values, value_cols = 'predicted',
                                    fill_missing_dates = True, freq = '3H')
-
+noaa_forecast                                 
 ```
 
+```{python}
+plt.close()
+noaa_forecast.plot()
+plt.show()
+```
+
+# Past Covariates
 
 
 ```{python}
@@ -97,17 +216,48 @@ neon_temp = ds.dataset(
     "neon4cast-targets/neon/TAAT_30min-basic-DP1.00003.001",
     format="parquet",
     filesystem=s3)
-expression = (ds.field("site_id") == "BART")
-historical = neon_temp.to_table(filter=expression)
+expression = (ds.field("siteID") == "BART")
+historical = (neon_temp
+              .to_table(filter=expression)
+              .to_pandas()[['startDateTime', 'tempTripleMean']]
+             )
 
-df = ex.to_pandas()[['time', 'predicted']]
+historical
+```
+```{python}
+datetime_series = pd.to_datetime(historical['startDateTime'], infer_datetime_format=True, utc=True)
+datetime_index = pd.DatetimeIndex(datetime_series.values)
+values = historical.set_index(datetime_index)
+values.drop('startDateTime', axis=1,inplace=True)
+neon_measured = TimeSeries.from_dataframe(values, value_cols = 'tempTripleMean',
+                                   fill_missing_dates = True)
 ```
 
-
+```{python}
+plt.cla()
+neon_temps.plot()
+plt.show()
+```
 
 Note: more realistically, we would want to create a grouped time series reflecting each ensemble member in the forecast -- See  `darts.TimeSeries.from_group_dataframe` to build a `LIST` of timeseries from a `GROUPED` dataframe.
 
+# Forecasting with covariates
 
+
+```{python}
+regression = RegressionModel(lags=[-1,-2,-3,-4,-5,-6],
+                             lags_past_covariates = [-1],
+                             lags_future_covariates = [-1])
+
+regression.fit(train,
+               past_covariates = neon_measured,
+               future_covariates = noaa_forecast)
+
+reg_forecast = regression.predict(27)
+
+rmse(test, reg_forecast)
+
+```
 
 
 
