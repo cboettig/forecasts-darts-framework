@@ -117,4 +117,3 @@ dmypy.json
 *.gz
 *.csv
 *.ncdf
-*.html
