@@ -1,10 +1,8 @@
 from darts import TimeSeries
 import pandas as pd
-
-
-## Read in driver data
 import pyarrow.dataset as ds
 from pyarrow import fs
+
 
 s3 = fs.S3FileSystem(endpoint_override = "data.ecoforecast.org", anonymous = True)
 dataset = ds.dataset(
@@ -16,11 +14,21 @@ dataset = ds.dataset(
 expression = (
               (ds.field("site_id") == "BART") &
               (ds.field("variable") == "TMP") &
-              (ds.field("start_date") == "2022-04-01") &
+              (ds.field("start_date") == "2022-07-01") &
               (ds.field("cycle") == 0) &
               (ds.field("ensemble")  == 1)
               )
 ex = dataset.to_table(filter=expression)
+predicted = ex.to_pandas()[['time', 'predicted']]
+
+
+
+neon_temp = ds.dataset(
+    "neon4cast-targets/neon/TAAT_30min-basic-DP1.00003.001",
+    format="parquet",
+    filesystem=s3)
+expression = (ds.field("site_id") == "BART")
+historical = neon_temp.to_table(filter=expression)
 
 df = ex.to_pandas()[['time', 'predicted']]
 

@@ -253,9 +253,3 @@ matrix |>
 
 There are a great many richer variations of forecasts possible here. 
 Note that a forecaster might prefer to use values extracted from historical NOAA forecasts rather than actual measurements when creating a forecast.  
-
-```{r include=FALSE}
-## force close arrow connections by clearing workspace?
-rm(list=ls())
-gc()
-```
