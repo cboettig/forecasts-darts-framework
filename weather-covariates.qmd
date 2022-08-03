@@ -1,0 +1,261 @@
+---
+title: EFI Forecasting with meterological covariates
+---
+
+
+This tutorial introduces working with meteorological covariates using EFI-curated data products in R.
+
+We will use the `fable` library to produce a simple regression-based forecast using multiple weather covariates measured at NEON sites which are also predicted by NOAA's long term GEFS forecast, up to 30 days ahead.
+Because both NEON and NOAA data are made at high frequency across many sites, the data can be very large.
+In this tutorial, we will take advantage of Apache `arrow` to conveniently access and summarize the remote data over the spatial and temporal scale of interest on the fly, without having to ever read all of the data into R.  
+We begin by loading the necessary libraries:
+
+
+```{r}
+library(tidyverse)
+library(arrow)
+library(fable)
+```
+
+
+In this example, we will focus on the [EFI terrestrial challenge](https://projects.ecoforecast.org/neon4cast-docs/theme-carbon-and-water-fluxes.html) to forecast net ecosystem exchange (nee) of carbon dioxide measured by the flux towers at 10 NEON sites.
+We begin by reading in all available historical measuments of the 'target' observed fluxes from the EFI server.
+
+```{r}
+target <- read_csv("https://data.ecoforecast.org/targets/terrestrial_daily/terrestrial_daily-targets.csv.gz") |>
+  rename(site_id = siteID) |>
+  as_tsibble(index=time, key=site_id)
+```
+
+
+## Historical covariates from NEON
+
+To build our regression model forecast, we need some historical measurements of variables of interest.
+NEON provides this data through an API that packages data by site and month, and includes multiple different tables in a combined 'product', often including both 1min and 30min intervals. The API also enforces rate limits.
+While the `neonstore` package can streamline the downloading of all historical NEON data and import into a high-performance local database, this process can still be time-consuming.  
+EFI streamlines this process by taking daily snapshots of many NEON products and providing a high-performance remote database in which data are already 'stacked' into contiguous tables which can be easily filtered by site, time, or variable of interest.  
+
+Here, we will access the triple aspirated temperature (TAAT) measurements at 30 min resolution provided in NEON product DP1.00003.001,
+the relative humidity (RH) measurements at 30 min resolution (DP1.00098.001),
+and total primary precipitation (PRIPRE) at 30min resolution (DP1.00006.001).
+
+To align with the daily timescale of the target data, we will summarize this data into daily min, max, and mean values for each variable. 
+We will consider each of these as potential predictors in our forecasting model.
+
+
+We use `arrow` to establish a connection to the remote parquet-based database hosted by EFI's `data.ecoforecast.org` MINIO server.
+MINIO provides a bucket-based storage system which follows the Amazon Web Services Simple Storage System Application Programming Interface (AWS S3 API), making it compatible with a wide range of tools including `arrow`. 
+Importantly, the server only provides static storage, it is not a relational database. 
+However, `arrow` knows how to translate many `dplyr` SQL-esque operations into efficient 'range requests' that can subset just the required data, and summarize that data on the fly.
+This simple syntax is very powerful.
+We simply point to the `neon` subdirectory in the `neon4cast-targets` bucket of the server, as follows.
+
+```{r}
+neon <- s3_bucket("neon4cast-targets/neon",
+                  endpoint_override = "data.ecoforecast.org",
+                  anonymous = TRUE)
+
+# users could list all available tables with `neon$ls()`
+
+# we select the TAAT_30min table by using its full name
+remote_taat <- open_dataset(neon$path("TAAT_30min-basic-DP1.00003.001")) 
+```
+
+
+The above operations have not transferred any of the actual observation data across the network yet. 
+`arrow` operations exploit "lazy evaluation" to avoid unnecessary computation. 
+We can assemble arbitrary dplyr operations on this data, but those commands will not be evaluated until we call the `collect()` function.
+This allows arrow to first examine our requested operations and optimize it's evaluation to only download and process the data we need.
+Be patient with this command, especially if you have a slow network.
+Cloud-native operations are optimized for high-speed internet typically found on cloud computing platforms.
+The following examples could run faster if we filtered to the 10 focal siteIDs first, but as illustration, most machines should have no trouble doing all sites at once thanks to `arrow`:
+
+```{r}
+## Triple-aspirated temperature:
+neon_temp <- remote_taat |>
+  mutate(time = as.Date(startDateTime)) |>
+  group_by(siteID, time) |>
+  summarise(mean_tmp = mean(tempTripleMean, na.rm = TRUE),
+            min_tmp = min(tempTripleMinimum, na.rm = TRUE),
+            max_tmp = max(tempTripleMaximum, na.rm = TRUE)) |>
+  rename(site_id = siteID) |>
+  collect() |>
+  as_tsibble(index=time, key=site_id)
+```
+
+Once we have summarized and imported the temperature data, we can repeat the process for other data sources of interest:
+
+```{r}
+# Relative Humidity (also contains tempRH and dewTemp)
+rh <- open_dataset(neon$path("RH_30min-basic-DP1.00098.001"))  |>
+  mutate(time = as.Date(startDateTime)) |>
+  group_by(siteID, time) |>
+  summarise(mean_rh = mean(RHMean, na.rm = TRUE),
+            min_rh = min(RHMinimum, na.rm = TRUE),
+            max_rh = max(RHMaximum, na.rm = TRUE)) |>
+  rename(site_id = siteID) |>
+  collect() |>
+  as_tsibble(index=time, key=site_id)
+
+# Precipitation (priPrecipBulk)
+precip <- open_dataset(neon$path("PRIPRE_30min-basic-DP1.00006.001")) |>
+  mutate(time = as.Date(startDateTime)) |>
+  group_by(siteID, time) |>
+  summarise(sum_precip = sum(priPrecipBulk, na.rm = TRUE)) |>
+  collect() |>
+  rename(site_id = siteID) |>
+  as_tsibble(index=time, key=site_id)
+```
+
+We `left_join()` the data onto the `target` data.frame, which selects only those sites & dates represented in the target data.
+
+```{r}
+## Build a data.frame with additional columns for additional predictor variables
+matrix <- target |> 
+  left_join(neon_temp) |> 
+  left_join(rh) |> 
+  left_join(precip)
+
+head(matrix) # peek at data
+```
+
+
+Using this data matrix, we can construct a simple regression model in `fable`:
+
+```{r}
+fit <- matrix |> 
+  model(tslm = TSLM(nee ~ mean_tmp + min_tmp +
+                          max_tmp + mean_rh + 
+                          min_rh + max_rh))
+```
+
+
+
+There are a lot of implicitly missing data in the precipitation product (site-date combinations present in the target data but not in the precipitation data.)  Using an inner join instead, we can create an alternative, smaller data matrix that only retains rows where data is available both for the target CO2 flux measurements and precipitation measurements.
+This is required for building a regression model that includes precipitation as a predictor:
+
+```{r}
+## Precip data is really lacking, left_join introduces too many NAs
+matrix2 <- target |> left_join(neon_temp) |> left_join(rh) |> inner_join(precip)
+
+## time-series linear model including precip
+fit2 <- matrix2 |>
+  model(tslm = TSLM(nee ~ mean_tmp + min_tmp + max_tmp + 
+                          mean_rh + min_rh + max_rh + sum_precip))
+
+```
+
+
+
+##  NOAA GEFS forecast access
+
+
+To construct a forecast, we need to know expected values of these predictor variables in the future.
+To do so, we will extract the desired variables from the 30-day [NOAA GEFS](https://www.ncei.noaa.gov/products/weather-climate-models/global-ensemble-forecast) long-range forecast.
+EFI provides convenient access to seven variables predicted (at 2m height) by NOAA GEFS at each of the NEON sites.
+
+- PRES Pressure
+- TMP Temperature (C)
+- RH Relative Humidity (%)
+- UGRD U-component of wind
+- VGRD V-component of wind
+- APCP Total precip (kg/m^2 in 3 or 6-hr interval)
+- DSWRF Downward shortwave radiation flux
+- DLWRF Downward longwave radiation flux
+
+Note: kg/m^2 of rain (NOAA units) is the same thing as 1mm (NEON units) of rain!
+
+
+As before, we merely establish an `arrow` remote connection to the data product. 
+NOAA forecasts are found in the `noaa/gefs-v12/stage1` path of the `neon4cast-drivers` bucket.
+(v12 indicates the most current version, which has been in use since Sept 2020, `stage1` indicates the level of EFI post-processing applied to the NEON data.)
+
+NOAA GEFS expresses uncertainty using ensemble members.
+For simplicity, we will extract a single set of predictions of each variable at each site for each day.
+A richer model might request each ensemble member of the forecast seperately, and produce a different prediction for each ensemble member.
+
+```{r}
+noaa <- s3_bucket("neon4cast-drivers/noaa/gefs-v12/stage1",
+                  endpoint_override = "data.ecoforecast.org",
+                  anonymous = TRUE)
+
+## daily mean, min, max.  For simplicity, we are merely summarizing over all ensemble members here
+noaa_forecast <-
+  open_dataset(noaa, partitioning = c("start_date", "cycle")) |>
+  filter(cycle == 0,
+         variable %in% c("RH", "TMP"),
+         start_date == "2022-06-01") |>
+  mutate(day = horizon %/% 24) |>
+  group_by(start_date, variable, day, site_id) |>
+  summarise(mean = mean(predicted, na.rm = TRUE),
+            min = min(predicted, na.rm = TRUE),
+            max = max(predicted, na.rm = TRUE))|>
+  collect() |>
+  mutate(time = as.Date(start_date) + day)
+```
+
+We will collect precipitation data separately since we will use daily total volumes rather than mean/max/min:
+
+```{r}
+## Forecast precipitation as sum
+noaa_precip <-
+  open_dataset(noaa, partitioning = c("start_date", "cycle")) |>
+  filter(cycle == 0,
+         variable == "APCP",
+         start_date == "2022-06-01") |>
+  mutate(day = horizon %/% 24) |>
+  group_by(start_date, variable, day, site_id) |>
+  summarise(sum_precip = sum(predicted, na.rm = TRUE)) |>
+  collect() |>
+  mutate(time = as.Date(start_date) + day) |>
+  select(-variable)
+```
+
+
+Since `variable` is a column, we must convert to a 'wider' format which each variable (`mean_tmp`, `min_rh` etc) gets a column of it's own.
+Our data is now ready in the desired format:
+
+
+```{r}
+noaa_fc <- noaa_forecast |>
+  as_tsibble(index=time, key=c(site_id, variable)) |>
+  pivot_wider(names_from = variable, values_from = c(mean, min, max)) |>
+  rename_all(tolower) |>
+  left_join(noaa_precip)
+
+head(noaa_fc) # peek at data
+```
+
+
+
+
+To generate a forecast from the model, we simply provide the forecasted values as "new data."
+Note that the there is no need to provide a horizon as forecasts will be made for each time represented in the `new_data`. -- i.e. the 30 day horizon of the NOAA GEFS prediction.  
+
+
+```{r}
+fcst <- fit |> forecast(new_data = noaa_fc)
+```
+
+```{r}
+
+obs <- matrix |> 
+  filter(time > as.Date("2022-06-01"), time < as.Date("2022-07-01"))
+
+matrix |> 
+  filter(time > as.Date("2022-01-01"), time < as.Date("2022-06-01")) |>
+  autoplot(nee) +
+  autolayer(fcst) + 
+  geom_point(aes(time, nee), data = obs, shape="*") +
+  facet_wrap(~site_id) 
+```
+
+
+There are a great many richer variations of forecasts possible here. 
+Note that a forecaster might prefer to use values extracted from historical NOAA forecasts rather than actual measurements when creating a forecast.  
+
+```{r include=FALSE}
+## force close arrow connections by clearing workspace?
+rm(list=ls())
+gc()
+```
