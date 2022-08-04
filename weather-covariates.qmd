@@ -22,7 +22,7 @@ In this example, we will focus on the [EFI terrestrial challenge](https://projec
 We begin by reading in all available historical measuments of the 'target' observed fluxes from the EFI server.
 
 ```{r}
-target <- read_csv("https://data.ecoforecast.org/targets/terrestrial_daily/terrestrial_daily-targets.csv.gz") |>
+target <- read_csv("https://data.ecoforecast.org/neon4cast-targets/terrestrial_daily/terrestrial_daily-targets.csv.gz") |>
   rename(site_id = siteID) |>
   as_tsibble(index=time, key=site_id)
 ```
