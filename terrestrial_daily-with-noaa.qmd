@@ -27,14 +27,14 @@ from datetime import datetime
 We begin by reading in the historical data which we wish to forecast:
 
 ```{python}
-targets = pd.read_csv("https://data.ecoforecast.org/targets/terrestrial_daily/terrestrial_daily-targets.csv.gz")
+targets = pd.read_csv("https://data.ecoforecast.org/neon4cast-targets/terrestrial_daily/terrestrial_daily-targets.csv.gz")
 
 # Select a variable and site to examine & coerce dataframe to TimeSeries
 variable = "nee" # 
 df = targets
-df = df[df["siteID"] == 'BART']
-df = df[['time', variable]]
-series = TimeSeries.from_dataframe(df, time_col = 'time', value_cols = variable, fill_missing_dates = True)
+df = df[df["site_id"] == 'BART']
+df = df[df["variable"] == variable]
+series = TimeSeries.from_dataframe(df, time_col = 'datetime', value_cols = "observation", fill_missing_dates = True)
 ```
 
 For a proof-of-principle, we will imagine that today is June 1, 2022. 

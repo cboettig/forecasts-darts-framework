@@ -10,14 +10,14 @@ from pyarrow import csv
 #FIXME can darts.TimeSeries have multiple variables? multiple sites?
 ## See  darts.TimeSeries.from_group_dataframe to build a LIST of timeseries from a GROUPED dataframe
 
-def ts_parser(df, siteID, variable, freq=None):
-  df = df[df["siteID"] == siteID]
-  df = df[['time', variable]]
-  datetime_series = pd.to_datetime(df['time'], infer_datetime_format=True, utc=True)
+def ts_parser(df, site_id, variable, freq=None):
+  df = df[df["site_id"] == site_id]
+  df = df[df["variable"] == variable]
+  datetime_series = pd.to_datetime(df["datetime"], infer_datetime_format=True, utc=True)
   datetime_index = pd.DatetimeIndex(datetime_series.values)
   targets=df.set_index(datetime_index)
-  targets.drop('time', axis=1,inplace=True)
-  series = TimeSeries.from_dataframe(targets, value_cols = variable, fill_missing_dates = True, freq = freq)
+  targets.drop("datetime", axis=1,inplace=True)
+  series = TimeSeries.from_dataframe(targets, value_cols = "observation", fill_missing_dates = True, freq = freq)
   return(series)
 
 #FIXME can we handle multiple variables?
@@ -29,13 +29,13 @@ def efi_format(pred, site_id, variable):
   var1.shape # time x replicate -- 2D array can be converted to DataFrame
   
   df = pd.DataFrame(var1)
-  df['time'] = pred.time_index
+  df["datetime"] = pred.time_index
   # pivot longer, ensemble as id, not as column name
-  df = df.melt(id_vars="time", var_name="ensemble", value_name="predicted")
+  df = df.melt(id_vars="datetime", var_name="parameter", value_name="prediction")
   
-  df['variable'] = variable # "temperature"
-  df['site_id'] = site_id # "BART"
-  df = df[['time', 'site_id', 'variable', 'predicted', 'ensemble']]
+  df["variable"] = variable # "temperature"
+  df["site_id"] = site_id # "BART"
+  df = df[["datetime", "site_id", "variable", "prediction", "parameter"]]
   return(df)
 
 
@@ -64,7 +64,7 @@ def submit(forecast_df, theme, team = "cb_prophet", pub_time = date.today()):
 
 def forecast_each(model, targets, variables, horizon, freq = "D"):
   full = pd.DataFrame()
-  sites = targets["siteID"].unique()
+  sites = targets["site_id"].unique()
 
   for variable in variables:
     print(variable)
@@ -80,7 +80,7 @@ def forecast_each(model, targets, variables, horizon, freq = "D"):
 
 def forecast_routine(model, targets, variables, horizon, freq = "D"):
   full = pd.DataFrame()
-  sites = targets["siteID"].unique()
+  sites = targets["site_id"].unique()
 
   for variable in variables:
     print(variable)
@@ -104,8 +104,8 @@ def forecast_csv(df, theme, team, pub_time = date.today()):
   df.to_csv(filename, index=False)
 
 
-def ts_parser_orig(df, siteID, variable, freq=None):
-  df = df[df["siteID"] == siteID]
-  df = df[['time', variable]]
-  series = TimeSeries.from_dataframe(df, time_col = "time", value_cols = variable, fill_missing_dates = True, freq = freq)
+def ts_parser_orig(df, site_id, variable, freq=None):
+  df = df[df["site_id"] == site_id]
+  df = df[["datetime", variable]]
+  series = TimeSeries.from_dataframe(df, time_col = "datetime", value_cols = variable, fill_missing_dates = True, freq = freq)
   return(series)
