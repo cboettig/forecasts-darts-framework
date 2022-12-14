@@ -6,7 +6,7 @@ from sklearn.gaussian_process.kernels import RBF
 from utils.forecast_utils import submit, ts_parser, efi_format
 
 # read the forecasting data
-targets = pd.read_csv("https://data.ecoforecast.org/targets/terrestrial_daily/terrestrial_daily-targets.csv.gz")
+targets = pd.read_csv("https://data.ecoforecast.org/neon4cast-targets/terrestrial_daily/terrestrial_daily-targets.csv.gz")
 horizon = 35
 variables = ["nee", "le"]
 
@@ -37,7 +37,7 @@ scaler = Scaler()
 # 6. transform back to original units
 # 7. Convert from xarray to EFI standard format
 full = pd.DataFrame()
-sites = targets["siteID"].unique()
+sites = targets["site_id"].unique()
 
 for variable in variables:
     print(variable)

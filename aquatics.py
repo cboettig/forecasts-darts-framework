@@ -4,7 +4,8 @@ from utils.forecast_utils import forecast_each, submit
 from darts import TimeSeries
 
 ## Needs targets averaged over depths
-targets = pd.read_csv("aquatics-targets.csv.gz")
+targets = pd.read_csv("https://data.ecoforecast.org/neon4cast-targets/aquatics/aquatics-targets.csv.gz")
+
 horizon = 35
 variables = ["temperature", "oxygen", "chla"]
 model = Prophet()

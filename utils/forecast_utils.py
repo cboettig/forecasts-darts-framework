@@ -52,7 +52,7 @@ def submit(forecast_df, theme, team = "cb_prophet", pub_time = date.today()):
   os.environ["AWS_ACCESS_KEY_ID"] = ""
   os.environ["AWS_SECRET_ACCESS_KEY"] = ""
   
-  s3, path = fs.FileSystem.from_uri("s3://submissions?endpoint_override=data.ecoforecast.org")
+  s3, path = fs.FileSystem.from_uri("s3://neon4cast-submissions?endpoint_override=data.ecoforecast.org")
   filename = fc_name(theme = theme, team = team, pub_time = pub_time)
   where = path + "/" + filename
   table = pa.Table.from_pandas(forecast_df)
