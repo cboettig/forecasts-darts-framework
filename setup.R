@@ -3,4 +3,4 @@
 
 library(reticulate)
 reticulate::use_condaenv("renv/python/condaenvs/renv-python/")
-py_install(c("pytorch", "u8darts-all", "prophet", "pyarrow"))
+reticulate::py_install(c("pytorch", "u8darts-all", "prophet", "pyarrow"))
