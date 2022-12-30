@@ -13,6 +13,8 @@ from pyarrow import csv
 def ts_parser(df, site_id, variable, freq=None):
   df = df[df["site_id"] == site_id]
   df = df[df["variable"] == variable]
+  if len(df.index) == 0:
+    return(None)
   datetime_series = pd.to_datetime(df["datetime"], infer_datetime_format=True, utc=True)
   datetime_index = pd.DatetimeIndex(datetime_series.values)
   targets=df.set_index(datetime_index)
@@ -71,6 +73,8 @@ def forecast_each(model, targets, variables, horizon, freq = "D"):
     for site_id in sites:
       print(site_id)
       train = ts_parser(targets, site_id, variable, freq = freq)
+      if train is None:
+        continue
       model.fit(train)
       forecast = model.predict(horizon, num_samples=100)
       df = efi_format(forecast, site_id, variable)
