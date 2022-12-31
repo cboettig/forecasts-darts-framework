@@ -1,6 +1,6 @@
 ---
-pagetitle: aquatics
-toc-title: Table of contents
+pagetitle: ML Forecasts for Aquatics Challenge
+toc-title: ML Forecasts for Aquatics Challenge
 ---
 
 
@@ -12,7 +12,6 @@ pl_trainer_kwargs={"accelerator": "gpu", "gpus": 1, "auto_select_gpus": True}
 ```
 
 ``` {python}
-
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,28 +21,21 @@ from darts.datasets import AirPassengersDataset
 ```
 
 
-::: {.cell execution_count="3"}
 ``` {python}
-#series = TimeSeries.from_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz", time_col = "time")
-
-aquatics = pd.read_csv("https://data.ecoforecast.org/targets/aquatics/aquatics-targets.csv.gz") 
+aquatics = pd.read_csv("https://data.ecoforecast.org/neon4cast-targets/aquatics/aquatics-targets.csv.gz") 
 aquatics
 ```
 
 ``` {python}
-
- temp = aquatics.query("siteID == 'BARC'").query("depth_temperature == 0.55").filter(items=['time', 'temperature', 'depth_temperature'])
-
- # consider siteID, depth variables as "future covariates", 
+temp = aquatics.query("site_id == 'BARC'").query("variable=='temperature'").filter(items=['datetime', 'observation'])
 ```
 
 
 ``` {python}
 
-series = TimeSeries.from_dataframe(temp, time_col = 'time', value_cols='temperature', fill_missing_dates=True, freq='D')
+series = TimeSeries.from_dataframe(temp, time_col = 'datetime', value_cols='observation', fill_missing_dates=True, freq='D')
 ```
 
-(Why is there a huge gap in 2018?)
 
 ``` {python}
 plt.cla()
@@ -83,11 +75,16 @@ plt.show()
 # Probablistic Forecasts
 
 ``` {python}
-from darts.models import ExponentialSmoothing, Prophet, AutoARIMA, Theta
-model_es = ExponentialSmoothing()
-model_es.fit(train)
-probabilistic_forecast = model_es.predict(len(val), num_samples=500)
+## hmm ES fails to converge with defaults
+from darts.models import ExponentialSmoothing, Prophet # not probablistic: , AutoARIMA, Theta
+model = Prophet()
+model.fit(train)
+probabilistic_forecast = model.predict(len(val), num_samples=50)
 
+```
+
+```{python}
+plt.close()
 plot.cla() # clear
 series.plot(label="actual")
 probabilistic_forecast.plot(label="probabilistic forecast")
@@ -115,10 +112,9 @@ Alternatively, we can fill missing data and smooth the process using a filter su
 ``` {python}
 from darts.models import GaussianProcessFilter
 from sklearn.gaussian_process.kernels import RBF, DotProduct, WhiteKernel
-kernel = RBF()
-gpf = GaussianProcessFilter(kernel=kernel, alpha=0.1, normalize_y=True)
-## Weirdly fails when GPU is visible. (ridiculuous since does not touch GPU?)
-#filtered_series = gpf.filter(train, num_samples=1)
+kernel = RBF(length_scale=1) + WhiteKernel(noise_level=1)
+gpf = GaussianProcessFilter(kernel=kernel, normalize_y=True)
+filtered_series = gpf.filter(train, num_samples=5)
 ```
 
 ``` {python}
@@ -184,6 +180,12 @@ pred.plot(low_quantile=0.2, high_quantile=0.8, label="20-80th percentiles")
 
 plt.show()
 ```
+
+
+
+
+
+
 
 ``` {python}
 # some methods for darts.Timeseries: Observe:
@@ -277,11 +279,11 @@ da.to_netcdf("test.ncdf")
 # Cannot have repeated time indices, divide into unique series
 
 # average over repeated depth measurements on same day at same site?
-temp_POSE  = aquatics.query("siteID == 'POSE'").filter(items=['time', 'temperature', 'depth_temperature'])
-oxygen_POSE  = aquatics.query("siteID == 'POSE'").filter(items=['time', 'oxygen', 'depth_oxygen'])
+temp_POSE  = aquatics.query("site_id == 'POSE'").filter(items=['datetime', 'temperature', 'depth_temperature'])
+oxygen_POSE  = aquatics.query("site_id == 'POSE'").filter(items=['datetime', 'oxygen', 'depth_oxygen'])
 temp_POSE
-series_tP = TimeSeries.from_dataframe(temp_POSE, time_col = 'time', value_cols='temperature', fill_missing_dates=True, freq='D')
-series_oP = TimeSeries.from_dataframe(oxygen_POSE, time_col = 'time', value_cols='oxygen', fill_missing_dates=True, freq='D')
+series_tP = TimeSeries.from_dataframe(temp_POSE, time_col = 'datetime', value_cols='temperature', fill_missing_dates=True, freq='D')
+series_oP = TimeSeries.from_dataframe(oxygen_POSE, time_col = 'datetime', value_cols='oxygen', fill_missing_dates=True, freq='D')
 ```
 
 
