@@ -263,6 +263,27 @@ da.to_netcdf("test.ncdf")
 #da.reindex_like(template)
 ```
 
+## Adding weather covariates!
+
+``` {python}
+import pyarrow.dataset as ds
+from pyarrow import fs
+
+s3 = fs.S3FileSystem(endpoint_override = "data.ecoforecast.org", anonymous = True)
+dataset = ds.dataset(
+    "neon4cast-drivers/noaa/gefs-v12/stage1",
+    format="parquet",
+    filesystem=s3,
+    partitioning=["start_date", "cycle"]
+)
+expression = (
+              (ds.field("start_date") == "2022-04-01") &
+              (ds.field("cycle") == 00) &
+              (ds.field("ensemble") == 1)
+              )
+ex = dataset.to_table(filter=expression)
+```
+
 
 
 

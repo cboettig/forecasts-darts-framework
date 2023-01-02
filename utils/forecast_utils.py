@@ -5,8 +5,9 @@ from darts import TimeSeries
 from pyarrow import fs
 import pyarrow as pa
 from pyarrow import csv
-#FIXME can darts.TimeSeries have multiple variables? multiple sites?
-## See  darts.TimeSeries.from_group_dataframe to build a LIST of timeseries from a GROUPED dataframe
+
+# DEVNOTE: can darts.TimeSeries have multiple variables? multiple sites?
+# See darts.TimeSeries.from_group_dataframe to build a LIST of timeseries from a GROUPED dataframe
 
 def ts_parser(df, site_id, variable, freq=None):
   df = df[df["site_id"] == site_id]
@@ -73,7 +74,8 @@ def forecast_each(model, targets, variables, horizon, freq = "D",
         train = interp.filter(train)
       if scaler is not None:
         train = scaler.fit_transform(train)
-        
+      
+      ## FIXME -- support additional model kwargs, e.g. epochs  
       model.fit(train)
       forecast = model.predict(horizon, num_samples=num_samples)
       if scaler is not None:
