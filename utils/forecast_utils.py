@@ -30,7 +30,7 @@ def efi_format(pred, site_id, variable):
   df = df.melt(id_vars="datetime", var_name="parameter", value_name="prediction")
   df["variable"] = variable # "temperature"
   df["site_id"] = site_id # "BART"
-  df["family"] = "sample"
+  df["family"] = "ensemble"
   df = df[["datetime", "site_id", "variable",
            "prediction", "parameter", "family"]]
   return(df)
@@ -49,7 +49,8 @@ def submit(forecast_df, theme, team = "cb_prophet", pub_time = date.today()):
   s3, path = fs.FileSystem.from_uri("s3://neon4cast-submissions?endpoint_override=data.ecoforecast.org")
   filename = fc_name(theme = theme, team = team, pub_time = pub_time)
   where = path + "/" + filename
-  table = pa.Table.from_pandas(forecast_df)
+  forecast_df["reference_datetime"] = pub_time
+  table = pa.Table.from_pandas(forecast_df, preserve_index=False)
   with s3.open_output_stream(where) as file:
     csv.write_csv(table, file)
 

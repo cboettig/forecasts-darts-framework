@@ -212,7 +212,7 @@ df['variable'] = "temperature"
 df['site_id'] = "BART"
 df['reference_datetime'] = str(today)
 df['model_id'] = model_id
-df['family'] = "sample"
+df['family'] = "ensemble"
 df
 ```
 And we're ready to submit
