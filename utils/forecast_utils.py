@@ -57,7 +57,9 @@ def submit(forecast_df, theme, team, pub_time = date.today()):
   with s3.open_output_stream(where) as file:
     csv.write_csv(table, file)
 
-
+def isNaN(train):
+  x = train.values()
+  return all(x != x)
 
 
 def forecast_each(model, targets, variables, horizon, freq = "D",
@@ -75,6 +77,8 @@ def forecast_each(model, targets, variables, horizon, freq = "D",
       train = ts_parser(targets, site_id, variable, freq = freq,
                         reference_datetime = reference_datetime)
       if train is None:
+        continue                        
+      if isNaN(train):
         continue
       if interp is not None:
         train = interp.filter(train)
